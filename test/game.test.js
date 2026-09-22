@@ -137,8 +137,10 @@ test('引擎对称：镜像位置的坦克用同样的随机数，开局一段�
       const s = seed * 31 + m.controllers.get(b).tank.index * 7;
       for (const id of [b, r]) { const c = m.controllers.get(id); c.rng = makeRng(s); c.exec.rng = c.rng; }
     }
-    // 前 3 秒双方还没有正面相遇，不会出现“同一帧抢同一格”这种只能交替裁决的情况，必须严格对称
-    for (let f = 0; f < 60 * 3; f++) {
+    // 双方正面相遇（红蓝两车相距 ≤ 2 格）之前，不会出现“同一帧抢同一格”这种只能随机裁决的情况，必须严格对称
+    const met = () => g.tanks.some((p) => p.team === 'blue' && g.tanks.some((q) => q.team === 'red' && Math.abs(p.fx - q.fx) + Math.abs(p.fy - q.fy) <= 2));
+    let f = 0;
+    for (; f < 60 * 4 && !met(); f++) {
       m.tick(STEP);
       for (const [b, r] of [['B1', 'R1'], ['B2', 'R2']]) {
         const B = g.getTank(b);
@@ -147,5 +149,6 @@ test('引擎对称：镜像位置的坦克用同样的随机数，开局一段�
         assert.equal(B.dir, FLIP[R.dir], `seed ${seed} 第 ${f} 帧 ${b}/${r} 朝向不对称`);
       }
     }
+    assert.ok(f >= 60 * 2, `seed ${seed} 只比较了 ${f} 帧`);
   }
 });

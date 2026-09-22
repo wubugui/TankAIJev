@@ -153,6 +153,17 @@ export function attackSideSpots(game, team, side) {
   return spots.filter((s) => sideOfSpot(base, s, team) === side);
 }
 
+// 从射击位打到基地要先打穿几块砖（射击位本身是砖也算，得先打掉才能站上去）
+export function wallsToBase(game, spot, base) {
+  const dx = Math.sign(base.x - spot.x);
+  const dy = Math.sign(base.y - spot.y);
+  let n = 0;
+  for (let x = spot.x, y = spot.y; x !== base.x || y !== base.y; x += dx, y += dy) {
+    if (game.tileAt(x, y) === T.BRICK) n++;
+  }
+  return n;
+}
+
 function sideOfSpot(base, s, team) {
   if (s.x === base.x) return 'front';
   const west = s.x < base.x;
@@ -219,12 +230,13 @@ export function analyze(game, tank, ctx = {}) {
   const nearestEnemy = aliveEnemies.reduce((m, e) => (!m || e.path < m.path ? e : m), null);
   const baseThreat = aliveEnemies.reduce((m, e) => (!m || e.distToOurBase < m.distToOurBase ? e : m), null);
 
-  // 三条进攻路线：路程，以及附近有哪些敌车
+  // 三条进攻路线：到最近射击位的路程、从那里还要打穿几块砖，以及附近有哪些敌车
   const attackSides = {};
   for (const side of ATTACK_SIDES) {
     const spots = attackSideSpots(game, team, side);
     const near = aliveEnemies.filter((e) => spots.some((s) => manhattan(s, e.tank) <= 4)).map((e) => e.id);
-    attackSides[side] = { dist: minSpot(spots), near };
+    const best = spots.reduce((m, s) => (pathDist(s.x, s.y) < (m ? pathDist(m.x, m.y) : Infinity) ? s : m), null);
+    attackSides[side] = { dist: best ? pathDist(best.x, best.y) : Infinity, walls: best ? wallsToBase(game, best, enemyBase) : 0, near };
   }
   const attackDist = Math.min(...ATTACK_SIDES.map((s) => attackSides[s].dist));
 
@@ -353,19 +365,20 @@ function stateCompact(game, a, ctx) {
 function tacticalOptions(game, a, style) {
   const o = {};
   const c = style === 'compact';
-  const tiles = (v) => (v === Infinity ? 'unreachable' : `${round1(v)} tiles`);
+  const tiles = (v) => (v === Infinity ? 'unreachable' : `${round1(v)} tile${round1(v) === 1 ? '' : 's'}`);
   for (const side of ATTACK_SIDES) {
     const info = a.attackSides[side];
     if (info.dist === Infinity) continue; // 这一侧没有能到达的射击位
     // 精简版不写附近的敌车（state 里已有每辆敌车的位置），给 Laya 的题目长度（约 192 token）留余量
     const near = info.near.length && !c ? `; enemy ${info.near.join(' and ')} is near that side` : '';
+    const walls = `${info.walls} wall${info.walls === 1 ? '' : 's'}`;
     o[`attack_${side}`] = c
-      ? `attack from ${side} (${tiles(info.dist)}${near})`
-      : `Attack the enemy base from its ${side} side (${tiles(info.dist)} to a firing spot${near}).`;
+      ? `attack ${side} (${tiles(info.dist)}, ${walls})`
+      : `Attack the enemy base from its ${side} side (${tiles(info.dist)} to a firing spot, then ${walls} to shoot through before the base${near}).`;
   }
   const why = a.ownStatus.lost5 > 0
-    ? `it lost ${a.ownStatus.lost5} hp in the last 5s`
-    : a.baseThreat && a.baseThreat.distToOurBase <= 5 ? `enemy ${a.baseThreat.id} is ${a.baseThreat.distToOurBase} tiles from it` : '';
+    ? (c ? `lost ${a.ownStatus.lost5} hp in 5s` : `it lost ${a.ownStatus.lost5} hp in the last 5s`)
+    : a.baseThreat && a.baseThreat.distToOurBase <= 5 ? (c ? `${a.baseThreat.id} ${a.baseThreat.distToOurBase} tiles from it` : `enemy ${a.baseThreat.id} is ${a.baseThreat.distToOurBase} tiles from it`) : '';
   const covered = a.allyCovering ? (c ? ', teammate covers it' : '; your teammate is already covering it') : '';
   o.defend_our_base = c
     ? (why ? `defend base (${why}${covered})` : `guard base (${tiles(a.guardDist)}, safe${covered})`)

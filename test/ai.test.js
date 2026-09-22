@@ -131,6 +131,23 @@ test('基地近 5 秒掉血会被标记为告急；队友已在照看时守家�
   assert.equal(buildDecision(g, g.getTank('B2'), 'tactical', {}).state.our_base.lost_hp_last_5s, 0);
 });
 
+test('进攻选项写明每一侧到射击位后还要打穿几道墙（只陈述事实），墙被打掉后数字跟着变', async () => {
+  const { wallsToBase } = await import('../public/js/observe.js');
+  const { T } = await import('../public/js/constants.js');
+  const g = new Match({ kinds: { B1: 'idle', B2: 'idle', R1: 'idle', R2: 'idle' }, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 }).game;
+  const base = g.bases.red;
+  assert.equal(wallsToBase(g, { x: base.x - 5, y: base.y }, base), 2, '基地侧面两层砖');
+  assert.equal(wallsToBase(g, { x: base.x, y: base.y + 5 }, base), 3, '正面三层砖');
+  const b1 = g.getTank('B1');
+  const full = buildDecision(g, b1, 'tactical', {});
+  assert.match(full.options.attack_left, /then 2 walls to shoot through/);
+  assert.match(full.options.attack_front, /then 3 walls to shoot through/);
+  assert.equal(full.analysis.attackSides.left.walls, 2);
+  assert.match(buildDecision(g, b1, 'tactical', { style: 'compact' }).options.attack_left, /^attack left \(\d+(\.\d)? tiles, 2 walls\)$/);
+  g.setTile(base.x - 1, base.y, T.EMPTY);
+  assert.match(buildDecision(g, b1, 'tactical', {}).options.attack_left, /then 1 wall to shoot through/);
+});
+
 test('进攻路线：三侧射击位各自可达，执行层会往选定的那一侧走', async () => {
   const { attackSideSpots } = await import('../public/js/observe.js');
   const g = new Match({ kinds: RULE, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 }).game;

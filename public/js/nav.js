@@ -8,7 +8,7 @@ export function isWallOf(game, team, x, y) {
   return Math.abs(b.x - x) <= 1 && Math.abs(b.y - y) <= 1;
 }
 
-function stepCost(game, x, y, self) {
+export function stepCost(game, x, y, self) {
   const tile = game.tileAt(x, y);
   if (tile === T.STEEL || tile === T.WATER || tile === T.BASE) return Infinity;
   let c = 1;
@@ -71,6 +71,19 @@ export function routeTo(nav, goals) {
   if (v === nav.start) return { ...best, step: null };
   while (nav.prev[v] !== nav.start && nav.prev[v] !== -1) v = nav.prev[v];
   return { ...best, step: { x: v % nav.w, y: (v / nav.w) | 0 } };
+}
+
+// 起点到 goal 的完整路径（不含起点，含终点）；到不了返回 null
+export function pathTo(nav, goal) {
+  let v = goal.y * nav.w + goal.x;
+  if (nav.dist[v] === Infinity) return null;
+  const tiles = [];
+  while (v !== nav.start) {
+    tiles.push({ x: v % nav.w, y: (v / nav.w) | 0 });
+    v = nav.prev[v];
+    if (v === -1) return null;
+  }
+  return tiles.reverse();
 }
 
 export function dirBetween(ax, ay, bx, by) {
