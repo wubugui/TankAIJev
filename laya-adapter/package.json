@@ -1,0 +1,17 @@
+{
+  "name": "laya-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "把本地 Laya 模型包装成 Jev 兼容的 /v1/systemone 接口，供坦克大战测试台调用",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "fake": "node server.mjs --fake"
+  },
+  "dependencies": {
+    "@receptron/laya": "^0.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

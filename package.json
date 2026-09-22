@@ -1,0 +1,15 @@
+{
+  "name": "npc-tank-battle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "2v2 坦克大战：测试 Jev / Laya 等决策模型作为队友和敌人",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "test": "node --test",
+    "arena": "node --env-file-if-exists=.env tools/arena.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

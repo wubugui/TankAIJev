@@ -1,0 +1,44 @@
+{
+  "_说明": "决策后端列表。任何兼容 Jev systemone 接口（POST {model,state,questions} → {answers,usage}）的服务都可以加在这里，重启服务后出现在游戏的下拉框里。baseUrlEnv 指定的环境变量给服务根地址（接口路径沿用 url 里的），urlEnv 给完整接口地址；model 可用 modelEnv 覆盖；apiKeyEnv 指向存放密钥的环境变量（密钥只留在服务端），apiKeyRequired 为 true 时没密钥就不调用。pricePerMTok > 0 的后端受总预算 BUDGET_USD 约束。",
+  "backends": [
+    {
+      "id": "laya",
+      "label": "Laya（局域网 / 本地）",
+      "url": "http://127.0.0.1:8790/v1/systemone",
+      "healthUrl": "http://127.0.0.1:8790/health",
+      "baseUrlEnv": "LAYA_BASE_URL",
+      "urlEnv": "LAYA_URL",
+      "healthUrlEnv": "LAYA_HEALTH_URL",
+      "model": "laya",
+      "modelEnv": "LAYA_MODEL",
+      "apiKeyEnv": "LAYA_API_KEY",
+      "promptStyle": "compact",
+      "pricePerMTok": 0,
+      "maxRps": 50,
+      "timeoutMs": 8000
+    },
+    {
+      "id": "jev",
+      "label": "Jev（TypeSafe 云端）",
+      "url": "https://api.typesafe.ai/v1/systemone",
+      "urlEnv": "JEV_URL",
+      "model": "jev-latest",
+      "modelEnv": "JEV_MODEL",
+      "apiKeyEnv": "JEV_API_KEY",
+      "apiKeyRequired": true,
+      "promptStyle": "full",
+      "pricePerMTok": 0.042,
+      "maxRps": 12,
+      "timeoutMs": 3000
+    },
+    {
+      "id": "mock",
+      "label": "Mock（离线随机，测接口用）",
+      "url": "http://127.0.0.1:${PORT}/mock/v1/systemone",
+      "model": "mock",
+      "pricePerMTok": 0,
+      "maxRps": 100,
+      "timeoutMs": 2000
+    }
+  ]
+}
