@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>坦克大战 NPC 测试台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>坦克大战 <span>NPC 测试台</span></h1>
+    <div id="budgetBadge" class="badge" title="本浏览器调用 Jev 的累计花费；上限在“AI 连接设置”里改">Jev 花费 —</div>
+  </header>
+
+  <main>
+    <!-- 设置页 -->
+    <section id="setup" class="card setup">
+      <h2>对局设置</h2>
+      <p class="hint">为每辆坦克选择控制者：Laya、Jev、规则 AI 可以任意组合，对局中也能在右侧面板直接切换。规则 AI 不需要任何配置；要用 Laya / Jev，先在下面的“AI 连接设置”里填好。</p>
+
+      <div class="presets">
+        <span>快速预设：</span>
+        <button data-preset="coopLaya">我 + Laya 队友 vs 规则 AI</button>
+        <button data-preset="versusLaya">我 + 规则队友 vs Laya 敌人</button>
+        <button data-preset="layaVsRule">观战：Laya 队 vs 规则 AI</button>
+        <button data-preset="jevVsLaya">观战：Jev 队 vs Laya 队</button>
+        <button data-preset="coop">我 + Jev 队友 vs 规则 AI</button>
+        <button data-preset="versus">我 + 规则队友 vs Jev 敌人</button>
+        <button data-preset="jevVsRule">观战：Jev 队 vs 规则 AI</button>
+      </div>
+
+      <div class="slots">
+        <div class="team blue">
+          <h3>蓝方（下方基地）</h3>
+          <label>B1 <select id="slot-B1"></select></label>
+          <label>B2 <select id="slot-B2"></select></label>
+        </div>
+        <div class="team red">
+          <h3>红方（上方基地）</h3>
+          <label>R1 <select id="slot-R1"></select></label>
+          <label>R2 <select id="slot-R2"></select></label>
+        </div>
+      </div>
+
+      <details id="connPanel" class="conn" open>
+        <summary><b>AI 连接设置</b> <span id="connSummary" class="muted"></span></summary>
+        <p class="hint">Key 和 endpoint 只保存在你自己的浏览器里，只随请求发给你填写的中转服务或 Laya 服务，不会上传到本站。<b>Jev 不允许网页直接调用</b>（它的服务器拒绝跨域请求），必须经过中转：在本机运行 <code>npm start</code>，或把 <code>relay/cloudflare-worker.js</code> 部署到你自己的 Cloudflare。详见仓库 README。</p>
+        <div class="conn-grid">
+          <fieldset>
+            <legend>中转服务</legend>
+            <label>地址<input id="relayUrl" type="url" placeholder="http://localhost:3000" autocomplete="off" spellcheck="false"></label>
+            <p class="small">留空 = 本页面自己的服务（用 <code>npm start</code> 打开游戏时）。</p>
+            <div class="conn-status" id="relayStatus"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Jev（TypeSafe）</legend>
+            <label>API key<input id="jevKey" type="password" autocomplete="off" spellcheck="false" placeholder="apikey_…"></label>
+            <label>模型（可选）<input id="jevModel" placeholder="jev-latest" autocomplete="off" spellcheck="false"></label>
+            <label>本浏览器花费上限（美元）<input id="jevBudget" type="number" min="0" step="0.1"></label>
+            <div class="row"><span id="jevSpent" class="small"></span><span class="btns"><button id="jevTest" type="button">测试连接</button><button id="jevReset" type="button">花费清零</button></span></div>
+            <div class="conn-status" id="jevStatus"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Laya</legend>
+            <label>Endpoint<input id="layaUrl" type="url" placeholder="https://your-laya-host:8790" autocomplete="off" spellcheck="false"></label>
+            <label>API key（可选）<input id="layaKey" type="password" autocomplete="off" spellcheck="false"></label>
+            <label>模型（可选）<input id="layaModel" placeholder="laya" autocomplete="off" spellcheck="false"></label>
+            <label>调用方式
+              <select id="layaRoute">
+                <option value="relay">经中转（局域网 http 地址用这个）</option>
+                <option value="direct">浏览器直连（服务需支持 CORS，且为 https 或 localhost）</option>
+              </select>
+            </label>
+            <div class="row"><span></span><span class="btns"><button id="layaTest" type="button">测试连接</button></span></div>
+            <div class="conn-status" id="layaStatus"></div>
+          </fieldset>
+        </div>
+        <div class="row conn-foot">
+          <label class="check"><input id="connRemember" type="checkbox"> 在本浏览器记住（不勾选则关掉标签页就清除）</label>
+          <button id="connClear" type="button">清除已保存的 key 和地址</button>
+        </div>
+      </details>
+
+      <div class="settings">
+        <label>决策模式
+          <select id="mode">
+            <option value="tactical">战术层：模型选战术，程序负责走位瞄准</option>
+            <option value="direct">直接控制：模型每一步选移动/开火</option>
+          </select>
+        </label>
+        <label>提示词风格
+          <select id="promptStyle">
+            <option value="auto">按后端默认（Jev 完整版 / Laya 精简版）</option>
+            <option value="full">全部用完整版（更多上下文）</option>
+            <option value="compact">全部用精简版（公平对比 Jev 与 Laya）</option>
+          </select>
+        </label>
+        <label>提示词版本
+          <select id="promptVersion">
+            <option value="v3">v3：v1 + 基地告急时必须有人处理（推荐）</option>
+            <option value="v2">v2：角色分工 + 优先级（实测更差，留作对比）</option>
+            <option value="v1">v1：初版</option>
+          </select>
+        </label>
+        <label>决策间隔（毫秒，战术层）<input id="interval" type="number" min="150" max="5000" step="50" value="400"></label>
+        <label>对局时长（秒）<input id="matchSeconds" type="number" min="30" max="900" step="10" value="180"></label>
+        <label>基地血量<input id="baseHp" type="number" min="1" max="50" value="10"></label>
+        <label class="check"><input id="callouts" type="checkbox" checked> 队友 AI 喊话（多问一个问题，略增 token）</label>
+      </div>
+
+      <div id="backendStatus" class="backend-status"></div>
+      <div id="costEstimate" class="estimate"></div>
+
+      <div class="actions">
+        <button id="startBtn" class="primary">开始对局</button>
+      </div>
+
+      <details class="help">
+        <summary>操作说明</summary>
+        <ul>
+          <li><b>移动</b>：WASD 或方向键　<b>开火</b>：空格 或 J</li>
+          <li><b>给 AI 队友下命令</b>：1 进攻　2 回防　3 跟我　4 自由行动（只在你是人类玩家时生效）</li>
+          <li><b>P</b> 暂停　<b>R</b> 重开　<b>Esc</b> 返回设置；切到别的标签页会自动暂停，避免空耗调用</li>
+          <li>胜利条件：打爆对方基地，或把对方坦克全部打光（每辆 3 条命）；时间到比基地血量，再比击杀数</li>
+          <li>子弹能打碎砖墙，打不穿钢墙；水挡坦克不挡子弹；友军子弹不伤队友，但会打坏自家基地</li>
+        </ul>
+      </details>
+    </section>
+
+    <!-- 对局页 -->
+    <section id="play" class="play" hidden>
+      <div class="stage">
+        <canvas id="canvas" width="760" height="600"></canvas>
+        <div id="banner" class="banner" hidden></div>
+      </div>
+      <aside class="side">
+        <div class="hud card">
+          <div class="score">
+            <span class="blue" id="hudBlue">蓝 0</span>
+            <span id="hudTime">0:00</span>
+            <span class="red" id="hudRed">红 0</span>
+          </div>
+          <div id="hudBases" class="bases"></div>
+          <div id="warning" class="warning" hidden></div>
+        </div>
+
+        <div id="orders" class="card orders">
+          <div class="row"><b>给队友下命令</b><span id="currentOrder" class="muted">当前：自由行动</span></div>
+          <div class="order-buttons">
+            <button data-order="attack">1 进攻</button>
+            <button data-order="defend">2 回防</button>
+            <button data-order="follow">3 跟我</button>
+            <button data-order="free">4 自由</button>
+          </div>
+        </div>
+
+        <div id="tankCards" class="cards"></div>
+
+        <div class="card log">
+          <div class="row"><b>决策日志</b><label class="check small"><input id="logLocal" type="checkbox"> 显示本地 AI</label></div>
+          <ol id="logList"></ol>
+        </div>
+
+        <div class="controls">
+          <button id="pauseBtn">暂停 (P)</button>
+          <button id="restartBtn">重开 (R)</button>
+          <button id="backBtn">返回设置 (Esc)</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
