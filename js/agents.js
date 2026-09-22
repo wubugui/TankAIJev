@@ -34,11 +34,16 @@ export class HumanController {
     this.stats = newStats();
   }
   update() { return this.keyboard.input(); }
+  act() { return this.keyboard.input(); }
+  canDecide() { return false; }
+  needsDecision() { return false; }
+  decide() {}
+  abandonPending() {}
   dispose() {}
 }
 
 function newStats() {
-  return { decisions: 0, errors: 0, invalid: 0, warnings: 0, latencies: [], confSum: 0, confN: 0, lastError: null, lastWarning: null, tactics: {} };
+  return { decisions: 0, errors: 0, invalid: 0, warnings: 0, late: 0, latencies: [], confSum: 0, confN: 0, lastError: null, lastWarning: null, tactics: {} };
 }
 
 export class AIController {
@@ -76,11 +81,27 @@ export class AIController {
     return game.time - this.lastDecisionAt >= (this.settings.intervalMs / 1000) * this.jitter;
   }
 
+  canDecide() {
+    return this.tank.alive && !this.inFlight && this.kind !== 'idle';
+  }
+
+  // 实时模式：自己按时间决策，不等远程答案，当帧就按当前战术执行
   update(game, dt, ctx) {
     if (!this.tank.alive || this.kind === 'idle') return {};
     if (this.needsDecision(game)) this.decide(game, ctx);
+    return this.act(game, dt);
+  }
+
+  // 只执行当前战术（公平模式下由 Match 统一安排决策时机）
+  act(game, dt) {
+    if (!this.tank.alive || this.kind === 'idle') return {};
     const current = this.settings.mode === 'direct' ? this.exec.direct?.action : this.tactic;
     return this.exec.run(game, this.tank, current, dt);
+  }
+
+  // 公平模式下等太久还没回来的请求作废：答案晚到时局面已经变了，不能再用
+  abandonPending() {
+    if (this.inFlight) this.abandonedReq = this.reqId;
   }
 
   decisionContext(ctx) {
@@ -126,11 +147,16 @@ export class AIController {
 
   decideViaBackend(game, dec, dctx, ctx) {
     this.inFlight = true;
+    const req = (this.reqId = (this.reqId || 0) + 1);
     const t0 = performance.now();
     const payload = { backend: this.backendId, agent: this.tank.id, state: dec.state, questions: dec.questions };
     this.pending = this.decideRemote(payload)
       .then((res) => {
         if (this.disposed) return;
+        if (this.abandonedReq === req) {
+          this.stats.late++;
+          return;
+        }
         const ans = res.answers?.tactic;
         const choice = ans?.choice;
         if (!choice || !(choice in dec.options)) {

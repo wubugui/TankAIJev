@@ -102,6 +102,12 @@
             <option value="v1">v1：初版</option>
           </select>
         </label>
+        <label>时间模式
+          <select id="timing">
+            <option value="fair">公平：AI 思考时时间暂停，所有 AI 按同一时刻的局面决策（推荐）</option>
+            <option value="realtime">实时：不等 AI，远程 AI 按晚到的局面决策（体验真实网络延迟）</option>
+          </select>
+        </label>
         <label>决策间隔（毫秒，战术层）<input id="interval" type="number" min="150" max="5000" step="50" value="400"></label>
         <label>对局时长（秒）<input id="matchSeconds" type="number" min="30" max="900" step="10" value="180"></label>
         <label>基地血量<input id="baseHp" type="number" min="1" max="50" value="10"></label>
@@ -141,6 +147,7 @@
             <span class="red" id="hudRed">红 0</span>
           </div>
           <div id="hudBases" class="bases"></div>
+          <div id="hudTiming" class="bases"></div>
           <div id="warning" class="warning" hidden></div>
         </div>
 
