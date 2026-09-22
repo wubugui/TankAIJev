@@ -123,3 +123,29 @@ test('scanLine 能看到砖墙后面的基地', () => {
 test('parseMap 拒绝缺基地的地图', () => {
   assert.throws(() => parseMap(['...', '...']));
 });
+
+test('引擎对称：镜像位置的坦克用同样的随机数，开局一段时间内逐帧互为 180° 镜像', async () => {
+  const { Match, STEP } = await import('../public/js/match.js');
+  const { makeRng } = await import('../public/js/policies.js');
+  const FLIP = { up: 'down', down: 'up', left: 'right', right: 'left' };
+  for (const seed of [1, 2, 3]) {
+    const m = new Match({ kinds: { B1: 'rule', B2: 'rule', R1: 'rule', R2: 'rule' }, settings: { mode: 'tactical', intervalMs: 400 }, seed });
+    const g = m.game;
+    const W = g.w - 1;
+    const H = g.h - 1;
+    for (const [b, r] of [['B1', 'R1'], ['B2', 'R2']]) {
+      const s = seed * 31 + m.controllers.get(b).tank.index * 7;
+      for (const id of [b, r]) { const c = m.controllers.get(id); c.rng = makeRng(s); c.exec.rng = c.rng; }
+    }
+    // 前 3 秒双方还没有正面相遇，不会出现“同一帧抢同一格”这种只能交替裁决的情况，必须严格对称
+    for (let f = 0; f < 60 * 3; f++) {
+      m.tick(STEP);
+      for (const [b, r] of [['B1', 'R1'], ['B2', 'R2']]) {
+        const B = g.getTank(b);
+        const R = g.getTank(r);
+        assert.ok(Math.abs(B.fx - (W - R.fx)) < 1e-6 && Math.abs(B.fy - (H - R.fy)) < 1e-6, `seed ${seed} 第 ${f} 帧 ${b}/${r} 位置不对称`);
+        assert.equal(B.dir, FLIP[R.dir], `seed ${seed} 第 ${f} 帧 ${b}/${r} 朝向不对称`);
+      }
+    }
+  }
+});

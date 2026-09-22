@@ -2,11 +2,12 @@
 
 const TACTIC_ZH = {
   attack_enemy_base: '进攻敌方基地',
+  attack_left: '从左侧进攻基地',
+  attack_front: '正面进攻基地',
+  attack_right: '从右侧进攻基地',
   defend_our_base: '回防基地',
-  shoot_now: '立即开火',
-  dodge: '闪避子弹',
-  retreat: '撤退',
-  follow_teammate: '跟随队友',
+  retreat: '撤退重整',
+  follow_teammate: '支援队友',
   hold_position: '原地坚守',
   move_up: '↑ 移动',
   move_down: '↓ 移动',

@@ -50,7 +50,7 @@ test('对局都能在时限内结束', () => {
   }
 });
 
-test('决策请求格式：选项合法、精简版不超 Laya 的题目预算、state 可序列化', () => {
+test('决策请求格式：选项合法、精简版不超 Laya 的长度预算、state 可序列化', () => {
   const m = new Match({ kinds: RULE, settings: { mode: 'tactical', intervalMs: 400 }, seed: 3 });
   for (let i = 0; i < 60 * 8; i++) m.tick(STEP);
   for (const mode of ['tactical', 'direct']) {
@@ -64,85 +64,103 @@ test('决策请求格式：选项合法、精简版不超 Laya 的题目预算�
         assert.ok(!/NaN|Infinity/.test(json), json);
       }
       assert.deepEqual(Object.keys(full.options).sort(), Object.keys(compact.options).sort(), '两种风格的选项 id 必须一致');
-      // Laya 英文版每题的题目+选项上限 192 token；按 1 token ≈ 3.2 字符粗估，留余量
+      // Laya 英文版：题目+选项上限约 192 token，state 约 316 token。用局域网 Laya 实测：题目约 3.1 字符/token，state 约 2.8 字符/token，都留余量
       for (const q of Object.values(compact.questions)) {
         const header = q.instructions + Object.entries(q.criteria).map(([k, v]) => `${k} ${v}`).join(' ');
-        assert.ok(header.length < 560, `精简版题目过长：${header.length} 字符`);
+        assert.ok(header.length < 560, `精简版题目过长：${header.length} 字符`); // 实测约 3 字符/token → 约 185 token
       }
-      if (mode === 'tactical') assert.ok(full.options.attack_enemy_base && full.options.defend_our_base && full.options.hold_position);
-      else assert.equal(Object.keys(full.options).length, 9);
+      assert.ok(JSON.stringify(compact.state).length < 650, `精简版 state 过长：${JSON.stringify(compact.state).length} 字符`);
+      if (mode === 'tactical') {
+        assert.ok(full.options.defend_our_base && full.options.hold_position);
+        assert.ok(Object.keys(full.options).some((k) => k.startsWith('attack_')));
+        for (const low of ['shoot_now', 'dodge']) assert.equal(full.options[low], undefined, `战术层不应再有底层动作 ${low}`);
+      } else assert.equal(Object.keys(full.options).length, 9);
     }
   }
 });
 
-test('v2 提示词：角色、队友计划、基地态势；v1 保持原样', () => {
-  const m = new Match({ kinds: RULE, settings: { mode: 'tactical', intervalMs: 400 }, seed: 3 });
-  for (let i = 0; i < 60 * 9; i++) m.tick(STEP);
-  const ctx = m.context();
-  assert.equal(ctx.plans.R1, m.controllers.get('R1').tactic, '上下文里带着每辆车当前的战术');
-  const r2 = m.game.getTank('R2');
-  const v2 = buildDecision(m.game, r2, 'tactical', { promptVersion: 'v2', allyPlan: 'attack_enemy_base' });
-  assert.equal(v2.state.you.role, 'guard');
-  assert.equal(m.game.getTank('R1').index, 0);
-  assert.equal(v2.state.teammate.current_plan, 'attacking the enemy base');
-  assert.ok('lost_hp_last_5s' in v2.state.our_base && 'in_danger' in v2.state.our_base && 'walls_left' in v2.state.enemy_base);
-  assert.match(v2.questions.tactic.instructions, /Priorities/);
-  const v1 = buildDecision(m.game, r2, 'tactical', { promptVersion: 'v1' });
-  assert.equal(v1.state.you.role, undefined);
-  assert.equal(v1.state.our_base.in_danger, undefined);
-  assert.doesNotMatch(v1.questions.tactic.instructions, /Priorities/);
-  assert.deepEqual(Object.keys(v1.options).sort(), Object.keys(v2.options).sort(), '两个版本的选项 id 一致');
+test('全局视野：每辆车的位置、区域、移动方向、推断的意图，以及双方基地态势', () => {
+  const m = new Match({ kinds: { B1: 'idle', B2: 'idle', R1: 'idle', R2: 'idle' }, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 });
+  const g = m.game;
+  const r1 = g.getTank('R1');
+  // R1 从 (9,7) 一路往下开到 (9,10)，逼近蓝方基地 (9,14)
+  for (const [i, y] of [7, 8, 9, 10].entries()) {
+    Object.assign(r1, { x: 9, y, fx: 9, fy: y });
+    g.time = 1 + i * 0.3;
+    g.recordTrails();
+  }
+  const b2 = g.getTank('B2');
+  const d = buildDecision(g, b2, 'tactical', { allyPlan: 'attack_left', selfPlan: 'hold_position' });
+  const e = d.state.enemies.find((x) => x.id === 'R1');
+  assert.deepEqual(e.tile, [9, 10]);
+  assert.equal(e.zone, 'near our base');
+  assert.equal(e.heading, 'moving toward our base');
+  assert.equal(e.intent, 'attacking our base');
+  assert.deepEqual(d.state.our_base.threatened_by, ['R1']);
+  assert.equal(d.state.teammate.plan, 'attacking the enemy base from the left');
+  assert.equal(d.state.you.current_plan, 'holding position');
+  assert.match(d.state.you.zone, /right lane, our half/, 'B2 在 (16,14) 以东，对蓝方来说是右路');
+  // 同一辆车，从红方视角看：在“我方半场”的反面
+  const red = buildDecision(g, g.getTank('R2'), 'tactical', {});
+  assert.match(red.state.you.zone, /lane, our half/);
+  assert.match(red.options.hunt_B1 || '', /B1/);
 });
 
-test('基地近 5 秒掉血会被标记为告急', () => {
+test('区域左右以各自朝向为准：同一侧对红蓝双方是镜像的', async () => {
+  const { zoneOf } = await import('../public/js/observe.js');
+  const g = new Match({ kinds: RULE, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 }).game;
+  assert.equal(zoneOf(g, 1, 10, 'blue'), 'left lane, our half');
+  assert.equal(zoneOf(g, 17, 4, 'red'), 'left lane, our half', '旋转 180° 后的对称位置');
+  assert.equal(zoneOf(g, 9, 7, 'blue'), 'center, midfield');
+});
+
+test('基地近 5 秒掉血会被标记为告急；队友已在照看时守家选项会注明', () => {
   const m = new Match({ kinds: { B1: 'idle', B2: 'idle', R1: 'idle', R2: 'idle' }, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 });
   const g = m.game;
   for (let i = 0; i < 60; i++) m.tick(STEP);
   g.bases.blue.hitTimes.push(g.time);
   const d = buildDecision(g, g.getTank('B2'), 'tactical', {});
   assert.equal(d.state.our_base.lost_hp_last_5s, 1);
-  assert.equal(d.state.our_base.in_danger, true);
   assert.match(d.options.defend_our_base, /lost 1 hp in the last 5s/);
-  assert.match(buildDecision(g, g.getTank('B2'), 'tactical', { promptVersion: 'v2' }).options.defend_our_base, /URGENT/);
+  assert.doesNotMatch(d.options.defend_our_base, /URGENT/);
+  const covered = buildDecision(g, g.getTank('B2'), 'tactical', { allyPlan: 'defend_our_base' });
+  assert.equal(covered.state.teammate_covering_base, true);
+  assert.match(covered.options.defend_our_base, /already covering/);
+  assert.match(covered.questions.tactic.instructions, /at most one defender/);
   for (let i = 0; i < 60 * 6; i++) m.tick(STEP);
   assert.equal(buildDecision(g, g.getTank('B2'), 'tactical', {}).state.our_base.lost_hp_last_5s, 0);
 });
 
-test('队友没命了角色变成 solo', () => {
-  const m = new Match({ kinds: RULE, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 });
-  Object.assign(m.game.getTank('B2'), { alive: false, lives: 0 });
-  assert.equal(buildDecision(m.game, m.game.getTank('B1'), 'tactical', { promptVersion: 'v2' }).state.you.role, 'solo');
+test('进攻路线：三侧射击位各自可达，执行层会往选定的那一侧走', async () => {
+  const { attackSideSpots } = await import('../public/js/observe.js');
+  const g = new Match({ kinds: RULE, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 }).game;
+  const left = attackSideSpots(g, 'blue', 'left');
+  const right = attackSideSpots(g, 'blue', 'right');
+  const front = attackSideSpots(g, 'blue', 'front');
+  assert.ok(left.length && right.length && front.length);
+  assert.ok(left.every((s) => s.x < 9 && s.y === 0), '蓝方的左 = 红方基地的西侧');
+  assert.ok(right.every((s) => s.x > 9 && s.y === 0));
+  assert.ok(front.every((s) => s.x === 9));
+  const redLeft = attackSideSpots(g, 'red', 'left');
+  assert.ok(redLeft.every((s) => s.x > 9 && s.y === 14), '红方朝下，它的左 = 蓝方基地的东侧');
 });
 
-test('v3 提示词：协作开关 teammate_covering_base，不加角色和优先级，不用催促措辞', () => {
+test('反射层：子弹 3 格内飞来就闪，敌车在射线上就打（不管当前计划）', async () => {
+  const { Executor } = await import('../public/js/executor.js');
   const m = new Match({ kinds: { B1: 'idle', B2: 'idle', R1: 'idle', R2: 'idle' }, settings: { mode: 'tactical', intervalMs: 400 }, seed: 1 });
   const g = m.game;
-  const b2 = g.getTank('B2');
+  const t = g.getTank('B1');
+  Object.assign(t, { x: 3, y: 13, fx: 3, fy: 13, moving: null, dir: 'up' }); // (3,13) 左右都是空地
+  // 子弹从上方 2 格处往下飞
+  g.bullets.push({ id: 99, owner: 'R1', team: 'red', x: 3, y: 11, dir: 'down', alive: true });
+  const dodge = new Executor(() => 0).run(g, t, 'attack_front', STEP);
+  assert.ok(dodge.move === 'left' || dodge.move === 'right', `应该横向闪开，实际 ${JSON.stringify(dodge)}`);
+  g.bullets.length = 0;
+  // 敌车在右边同一行、中间无遮挡
   const r1 = g.getTank('R1');
-  Object.assign(r1, { x: 9, y: 11, fx: 9, fy: 11 }); // 蓝方基地在 (9,14)，R1 距离 3 格
-  // 队友在追别的车、离基地远 → 没人照看基地
-  const d = buildDecision(g, b2, 'tactical', { promptVersion: 'v3', allyPlan: 'hunt_R2' });
-  assert.equal(d.state.you.role, undefined);
-  assert.equal(d.state.teammate.current_plan, 'hunting enemy R2');
-  assert.equal(d.state.our_base.in_danger, true);
-  assert.equal(d.state.teammate_covering_base, false);
-  assert.match(d.questions.tactic.instructions, /exactly one defender/);
-  assert.doesNotMatch(d.questions.tactic.instructions, /Priorities|Your role/);
-  assert.doesNotMatch(d.options.defend_our_base, /URGENT/);
-  assert.doesNotMatch(d.options.attack_enemy_base, /walls left/);
-  assert.match(d.options.hunt_R1, /3 tiles from OUR base/);
-  assert.doesNotMatch(d.options.hunt_R2, /OUR base/);
-  // 队友正在追靠近基地的 R1 → 算作已照看
-  const covered = buildDecision(g, b2, 'tactical', { promptVersion: 'v3', allyPlan: 'hunt_R1' });
-  assert.equal(covered.state.teammate_covering_base, true);
-  assert.match(covered.options.defend_our_base, /already covering/);
-  const compact = buildDecision(g, b2, 'tactical', { promptVersion: 'v3', style: 'compact', allyPlan: 'defend_our_base' });
-  assert.match(compact.options.hunt_R1, /near OUR base/);
-  assert.match(compact.options.defend_our_base, /teammate already covers/);
-  // v2 保留催促措辞和 walls left
-  const v2 = buildDecision(g, b2, 'tactical', { promptVersion: 'v2' });
-  assert.match(v2.options.defend_our_base, /URGENT/);
-  assert.match(v2.options.attack_enemy_base, /walls left/);
+  Object.assign(r1, { x: 6, y: 13, fx: 6, fy: 13 });
+  const shot = new Executor(() => 0).run(g, t, 'defend_our_base', STEP);
+  assert.deepEqual(shot, { face: 'right', fire: true });
 });
 
 test('远程 AI 同队两辆车的决策时间错开半个周期，规则 AI 不错开', async () => {

@@ -11,7 +11,6 @@
 //   --interval ms            战术层决策间隔（默认 400）
 //   --seconds S              每局时长（默认 180）
 //   --style auto|full|compact 提示词风格（默认 auto：按后端配置）
-//   --prompt v1|v2|v3        提示词版本（默认 v3）
 //   --stagger                远程 AI 同队两车错开半个决策周期（实验选项，默认关）
 //   --realtime               按真实时间推进（模型延迟会影响战局）；默认“公平/锁步”：所有 AI 同一时刻决策，等答案回来再推进，只比决策质量
 //   --yes                    预计花费超过 $0.05 时不再询问确认
@@ -30,7 +29,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LOCAL = ['rule', 'random', 'idle'];
 
 function parseArgs(argv) {
-  const args = { blue: 'rule,rule', red: 'rule,rule', matches: 3, swap: false, mode: 'tactical', interval: 400, seconds: 180, style: 'auto', prompt: 'v3', stagger: false, realtime: false, yes: false };
+  const args = { blue: 'rule,rule', red: 'rule,rule', matches: 3, swap: false, mode: 'tactical', interval: 400, seconds: 180, style: 'auto', stagger: false, realtime: false, yes: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -42,7 +41,6 @@ function parseArgs(argv) {
     else if (a === '--interval') args.interval = Number(next());
     else if (a === '--seconds') args.seconds = Number(next());
     else if (a === '--style') args.style = next();
-    else if (a === '--prompt') args.prompt = next();
     else if (a === '--stagger') args.stagger = true;
     else if (a === '--realtime') args.realtime = true;
     else if (a === '--yes' || a === '-y') args.yes = true;
@@ -53,7 +51,7 @@ function parseArgs(argv) {
 }
 
 function readHelp() {
-  return 'npm run arena -- --blue jev,jev --red rule,rule --matches 3 [--swap] [--mode direct] [--interval 400] [--seconds 180] [--style compact] [--prompt v1] [--realtime]';
+  return 'npm run arena -- --blue jev,jev --red rule,rule --matches 3 [--swap] [--mode direct] [--interval 400] [--seconds 180] [--style compact] [--realtime]';
 }
 
 const toKind = (k) => (LOCAL.includes(k) ? k : `remote:${k}`);
@@ -76,7 +74,7 @@ async function main() {
   const rounds = args.matches * (args.swap ? 2 : 1);
   const worst = paidAgents.reduce((s, b) => s + decisionsPerAgent * perDecisionTokens * b.pricePerMTok / 1e6, 0) * rounds;
   const snap = budget.snapshot();
-  console.log(`对阵：蓝 [${blue.join(', ')}] vs 红 [${red.join(', ')}]，${rounds} 局，模式 ${args.mode}，提示词 ${args.prompt}，${args.realtime ? '实时' : '锁步'}`);
+  console.log(`对阵：蓝 [${blue.join(', ')}] vs 红 [${red.join(', ')}]，${rounds} 局，模式 ${args.mode}，${args.realtime ? '实时' : '公平（锁步）'}`);
   if (worst > 0) {
     console.log(`付费调用预估：最多约 $${worst.toFixed(4)}（通常更少，基地被拆会提前结束）；账本已花 $${snap.spent_usd} / 上限 $${snap.limit_usd}`);
     if (worst > 0.05 && !args.yes) {
@@ -104,7 +102,6 @@ async function main() {
         intervalMs: args.interval,
         callouts: false,
         promptStyle: args.style,
-        promptVersion: args.prompt,
         stagger: args.stagger,
         timing: args.realtime ? 'realtime' : 'fair',
         maxWaitMs: Infinity, // 批量评测不设等待上限，每个答案都等到

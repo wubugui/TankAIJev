@@ -1,23 +1,34 @@
 import { Executor } from './executor.js';
 
-// 规则 AI：作为基准线（baseline），与模型面对完全相同的选项。
+// 规则 AI：作为基准线（baseline），与模型面对完全相同的选项；闪避和开火由执行层的反射层处理。
 export function ruleTactic(dec, tank) {
   const o = dec.options;
   const a = dec.analysis;
-  if (o.dodge && a.incoming && a.incoming.dist <= 3) return 'dodge';
-  if (o.shoot_now && a.gunReady) return 'shoot_now';
   // 2 号车负责看家，敌人靠近基地 6 格就回防；1 号车只在 4 格内回防
   if (a.baseThreat && a.baseThreat.distToOurBase <= (tank.index === 1 ? 6 : 4)) return 'defend_our_base';
   if (a.order) {
-    if (a.order.order === 'attack') return 'attack_enemy_base';
+    if (a.order.order === 'attack') return bestAttack(o, a, tank);
     if (a.order.order === 'defend') return 'defend_our_base';
     if (a.order.order === 'follow' && o.follow_teammate) return 'follow_teammate';
   }
   if (tank.hp === 1 && o.retreat && a.nearestEnemy && a.nearestEnemy.path <= 4) return 'retreat';
   // 分工：1 号车拆家，2 号车先清附近的敌人
-  if (tank.index === 0) return 'attack_enemy_base';
+  if (tank.index === 0) return bestAttack(o, a, tank);
   if (a.nearestEnemy && a.nearestEnemy.path <= 7) return `hunt_${a.nearestEnemy.id}`;
-  return 'attack_enemy_base';
+  return bestAttack(o, a, tank);
+}
+
+// 夹击：1 号车从左、2 号车从右进攻（侧面只隔一层砖，比正面快得多）；这一侧到不了就选路程最短的一侧
+// 旧版总选路程最短的正面，模拟里一个写死的“左右夹击”脚本能 100% 赢它；现在这版对旧版约 87% 胜率
+function bestAttack(o, a, tank) {
+  const want = tank.index === 0 ? 'attack_left' : 'attack_right';
+  if (o[want]) return want;
+  let best = null;
+  for (const side of ['front', 'left', 'right']) {
+    if (!o[`attack_${side}`]) continue;
+    if (!best || a.attackSides[side].dist < a.attackSides[best].dist) best = side;
+  }
+  return best ? `attack_${best}` : 'hold_position';
 }
 
 // 直接控制模式下的规则 AI：先按战术规则想，再取执行层算出的第一步
@@ -45,14 +56,4 @@ export function randomChoice(options, rng) {
   return keys[Math.floor(rng() * keys.length)];
 }
 
-// 可复现的随机数（mulberry32）
-export function makeRng(seed = 1) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export { makeRng } from './constants.js';

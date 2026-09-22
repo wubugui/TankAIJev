@@ -1,4 +1,4 @@
-import { DIRS, T, DEFAULT_RULES, otherTeam } from './constants.js';
+import { DIRS, T, DEFAULT_RULES, otherTeam, snap, tileAlong, makeRng } from './constants.js';
 import { parseMap } from './map.js';
 
 export const DEFAULT_SLOTS = [
@@ -43,6 +43,7 @@ export class Game {
         shieldUntil: this.rules.spawnShield,
         cooldown: 0,
         kills: 0, deaths: 0, shots: 0, hits: 0, baseDamage: 0,
+        trail: [], // 最近 2 秒的位置（每 0.25 秒一个点），用来判断移动方向和意图
       };
       this.tanks.push(tank);
     }
@@ -55,12 +56,10 @@ export class Game {
     this.events = [];
     this.nextId = 1;
     this.frame = 0;
-    // 每帧交替更新顺序（蓝先 / 红先），避免先手优势
-    const byTeam = (team) => this.tanks.filter((t) => t.team === team);
-    this.updateOrders = [
-      [...byTeam('blue'), ...byTeam('red')],
-      [...byTeam('red'), ...byTeam('blue')],
-    ];
+    // 每帧随机决定坦克的更新顺序（按种子，可复现）。两辆车同一帧想开进同一格时，先更新的先占到。
+    // 以前是“偶数帧蓝先、奇数帧红先”轮流，但双方走对称路线时总在同一帧相遇，结果永远是同一方占到——规则 AI 对打红方赢了 2/3。
+    this.orderRng = makeRng((options.seed ?? 1) * 7919 + 1);
+    this.updateOrder = [...this.tanks];
   }
 
   inBounds(x, y) { return x >= 0 && y >= 0 && x < this.w && y < this.h; }
@@ -94,8 +93,15 @@ export class Game {
   step(dt) {
     if (this.over) return;
     this.time += dt;
-    for (const t of this.updateOrders[this.frame++ % 2]) this.updateTank(t, dt);
+    this.frame++;
+    const order = this.updateOrder;
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(this.orderRng() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    for (const t of order) this.updateTank(t, dt);
     this.updateBullets(dt);
+    this.recordTrails();
     this.checkEnd();
   }
 
@@ -119,17 +125,28 @@ export class Game {
     }
     if (input.fire) this.tryFire(t);
     if (t.moving) {
-      const step = this.rules.tankSpeed * dt;
+      const step = snap(this.rules.tankSpeed * dt);
       const dx = t.moving.x - t.fx;
       const dy = t.moving.y - t.fy;
-      if (Math.abs(dx) + Math.abs(dy) <= step) {
+      // 剩余距离也要对齐后再比，否则往两个方向走的坦克会差一帧到达
+      if (snap(Math.abs(dx) + Math.abs(dy)) <= step) {
         t.fx = t.x = t.moving.x;
         t.fy = t.y = t.moving.y;
         t.moving = null;
       } else {
-        t.fx += Math.sign(dx) * step;
-        t.fy += Math.sign(dy) * step;
+        t.fx = snap(t.fx + Math.sign(dx) * step);
+        t.fy = snap(t.fy + Math.sign(dy) * step);
       }
+    }
+  }
+
+  recordTrails() {
+    for (const t of this.tanks) {
+      if (!t.alive) continue;
+      const last = t.trail[t.trail.length - 1];
+      if (last && this.time - last.time < 0.25) continue;
+      t.trail.push({ time: this.time, x: t.fx, y: t.fy });
+      if (t.trail.length > 9) t.trail.shift();
     }
   }
 
@@ -166,6 +183,7 @@ export class Game {
       alive: true,
       cooldown: 0,
       shieldUntil: this.time + this.rules.spawnShield,
+      trail: [],
     });
     this.events.push({ type: 'spawn', x: sp.x, y: sp.y, tank: t.id });
   }
@@ -178,8 +196,8 @@ export class Game {
       for (const b of this.bullets) {
         if (!b.alive) continue;
         const d = DIRS[b.dir];
-        b.x += d.dx * s;
-        b.y += d.dy * s;
+        b.x = snap(b.x + d.dx * s);
+        b.y = snap(b.y + d.dy * s);
         this.collideBullet(b);
       }
       // 子弹互相抵消
@@ -189,7 +207,7 @@ export class Game {
         for (let c = a + 1; c < this.bullets.length; c++) {
           const b2 = this.bullets[c];
           if (!b2.alive || b1.team === b2.team) continue;
-          if (Math.abs(b1.x - b2.x) < 0.35 && Math.abs(b1.y - b2.y) < 0.35) {
+          if (snap(Math.abs(b1.x - b2.x)) < 0.35 && snap(Math.abs(b1.y - b2.y)) < 0.35) {
             b1.alive = b2.alive = false;
             this.events.push({ type: 'spark', x: (b1.x + b2.x) / 2, y: (b1.y + b2.y) / 2 });
           }
@@ -200,8 +218,12 @@ export class Game {
   }
 
   collideBullet(b) {
-    const tx = Math.round(b.x);
-    const ty = Math.round(b.y);
+    // 子弹所在格：先消掉浮点累积误差，正好在两格交界时算作“还在正要离开的那一格”。
+    // 直接用 Math.round 会让 +x/+y 方向（红方往下打）的子弹比 -x/-y 方向提前一步进入下一格，
+    // 平时看不出来，但闪避的时机一被放大，就会让一方系统性占便宜。
+    const d = DIRS[b.dir];
+    const tx = tileAlong(b.x, d.dx);
+    const ty = tileAlong(b.y, d.dy);
     if (!this.inBounds(tx, ty)) { b.alive = false; return; }
     const tile = this.tileAt(tx, ty);
     if (tile === T.BRICK) {
@@ -231,7 +253,7 @@ export class Game {
     }
     for (const t of this.tanks) {
       if (!t.alive || t.id === b.owner) continue;
-      if (Math.abs(t.fx - b.x) < 0.45 && Math.abs(t.fy - b.y) < 0.45) {
+      if (snap(Math.abs(t.fx - b.x)) < 0.45 && snap(Math.abs(t.fy - b.y)) < 0.45) {
         b.alive = false;
         if (t.team === b.team) { this.events.push({ type: 'spark', x: b.x, y: b.y }); return; }
         if (this.time < t.shieldUntil) { this.events.push({ type: 'shield', x: t.fx, y: t.fy }); return; }
