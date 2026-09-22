@@ -29,5 +29,35 @@ export const DEFAULT_RULES = {
   matchSeconds: 180,
 };
 
+// 坐标、距离在比较前对齐到 1e-6：消掉浮点累积误差。
+// 否则往 +方向 和往 -方向 走的物体误差方向相反，在“正好 3 格”这类临界点上会系统性偏向一边。
+export const snap = (v) => Math.round(v * 1e6) / 1e6;
+
+// 移动方向为 dir（+1/-1/0）的物体所在的格：正好在两格交界时算“还在正要离开的那一格”。
+// 不能直接 Math.round：它总往大的方向取整，往 +方向 和往 -方向 走的物体会被区别对待。
+export function tileAlong(v, dir) {
+  const x = snap(v);
+  return dir > 0 ? Math.ceil(x - 0.5) : Math.floor(x + 0.5);
+}
+
+// 坦克现在算在哪一格：静止时就是所在格；移动中走过一半算目标格，否则算出发格（按走过的距离判断，与方向无关）
+export function tankTile(t) {
+  if (!t.moving) return { x: t.x, y: t.y };
+  const progress = snap(Math.abs(t.fx - t.x) + Math.abs(t.fy - t.y));
+  return progress >= 0.5 ? { x: t.moving.x, y: t.moving.y } : { x: t.x, y: t.y };
+}
+
+// 可复现的随机数（mulberry32）
+export function makeRng(seed = 1) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export const TEAMS = ['blue', 'red'];
 export const otherTeam = (team) => (team === 'blue' ? 'red' : 'blue');

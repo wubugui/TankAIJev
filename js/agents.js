@@ -110,7 +110,7 @@ export class AIController {
     const allyId = Object.keys(ctx.teamOf || {}).find((id) => id !== this.tank.id && ctx.teamOf[id] === team);
     return {
       allyPlan: allyId ? ctx.plans?.[allyId] ?? null : null,
-      promptVersion: this.settings.promptVersion,
+      selfPlan: this.settings.mode === 'direct' ? this.exec.direct?.action || null : this.tactic,
       order: allyIsHuman ? ctx.orders?.[team] || null : null,
       allyIsHuman,
       callouts: this.settings.callouts,

@@ -84,8 +84,8 @@
       <div class="settings">
         <label>决策模式
           <select id="mode">
-            <option value="tactical">战术层：模型选战术，程序负责走位瞄准</option>
-            <option value="direct">直接控制：模型每一步选移动/开火</option>
+            <option value="tactical">战术层：模型定计划与配合，程序负责走位、瞄准、开火、闪避</option>
+            <option value="direct">直接控制（实验）：模型每一步选移动/开火</option>
           </select>
         </label>
         <label>提示词风格
@@ -93,13 +93,6 @@
             <option value="auto">按后端默认（Jev 完整版 / Laya 精简版）</option>
             <option value="full">全部用完整版（更多上下文）</option>
             <option value="compact">全部用精简版（公平对比 Jev 与 Laya）</option>
-          </select>
-        </label>
-        <label>提示词版本
-          <select id="promptVersion">
-            <option value="v3">v3：v1 + 基地告急时必须有人处理（推荐）</option>
-            <option value="v2">v2：角色分工 + 优先级（实测更差，留作对比）</option>
-            <option value="v1">v1：初版</option>
           </select>
         </label>
         <label>时间模式

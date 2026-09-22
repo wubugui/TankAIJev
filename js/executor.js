@@ -1,9 +1,14 @@
 import { DIRS, T, otherTeam, dirOrder } from './constants.js';
 import { dijkstra, routeTo, dirBetween, alignedDir, scanLine, safeToFire, firingSpots } from './nav.js';
-import { guardPosts } from './observe.js';
+import { guardPosts, incomingBullet, attackSideSpots } from './observe.js';
 
-// 执行层：把决策模型选出的“战术”或“单步动作”翻译成每帧的 {move, face, fire}。
+// 执行层：把决策模型选出的“计划”或“单步动作”翻译成每帧的 {move, face, fire}。
 // 所有 AI（规则 / 随机 / Jev / Laya）共用同一个执行层，只有“选什么”不同，便于公平对比。
+//
+// 分两层：
+//   反射层：每到一个格子中心先看——子弹 3 格内朝自己飞来就闪（闪不开就迎着开火抵消），
+//           有敌车在射线上就转过去打。这些对延迟敏感，不等模型。
+//   计划层：执行模型选的计划（从哪侧进攻、守家、追谁、支援、撤退、坚守），负责寻路和破墙。
 export class Executor {
   constructor(rng = Math.random) {
     this.rng = rng;
@@ -29,6 +34,9 @@ export class Executor {
     this.stuckFor = key === this.lastTile ? this.stuckFor + dt : 0;
     this.lastTile = key;
 
+    const reflex = this.reflex(game, tank);
+    if (reflex) return reflex;
+
     let input = this.runTactic(game, tank, tactic || 'hold_position');
     // 想走却一直原地不动（被队友/敌人堵住）→ 随机挪一步
     if (input.move || input.wantMove) {
@@ -43,7 +51,26 @@ export class Executor {
     return input;
   }
 
-  // 朝向上有敌方坦克/基地且不会误伤 → 顺手开火
+  // 反射：闪避和开火，不管当前计划是什么
+  reflex(game, tank) {
+    const inc = incomingBullet(game, tank, 3);
+    if (inc) {
+      const vertical = inc.travelDir === 'up' || inc.travelDir === 'down';
+      const sides = dirOrder(tank.team).filter((d) => (vertical ? d === 'left' || d === 'right' : d === 'up' || d === 'down'))
+        .filter((d) => game.isPassable(tank.x + DIRS[d].dx, tank.y + DIRS[d].dy, tank));
+      if (sides.length) return { move: sides[Math.floor(this.rng() * sides.length)] };
+      if (game.canFire(tank)) return { face: inc.from, fire: true }; // 躲不开就迎着子弹开火，子弹相撞会抵消
+    }
+    if (game.canFire(tank)) {
+      for (const dir of dirOrder(tank.team)) {
+        const s = scanLine(game, tank.x, tank.y, dir, tank);
+        if (s.first.kind === 'enemy' && s.first.dist <= 8 && safeToFire(s)) return { face: dir, fire: true };
+      }
+    }
+    return null;
+  }
+
+  // 朝向上有敌方坦克/基地且不会误伤 → 顺手开火（移动途中也会）
   opportunisticFire(game, tank, dir = tank.dir) {
     if (!game.canFire(tank)) return false;
     const s = scanLine(game, tank.x, tank.y, dir || tank.dir, tank);
@@ -101,24 +128,11 @@ export class Executor {
     const foe = otherTeam(tank.team);
     if (tactic.startsWith('hunt_')) return this.hunt(game, tank, tactic.slice(5));
     switch (tactic) {
-      case 'attack_enemy_base': {
-        const base = game.bases[foe];
-        const dir = alignedDir(tank.x, tank.y, base.x, base.y);
-        if (dir) {
-          const s = scanLine(game, tank.x, tank.y, dir, tank);
-          if (s.target.kind === 'enemy_base' && s.target.dist <= 5 && safeToFire(s)) return { face: dir, fire: true };
-        }
-        return this.goTo(game, tank, firingSpots(game, base.x, base.y, 5, true, tank.team)) || this.hold(game, tank);
-      }
+      case 'attack_left': return this.attackBase(game, tank, 'left');
+      case 'attack_front': return this.attackBase(game, tank, 'front');
+      case 'attack_right': return this.attackBase(game, tank, 'right');
+      case 'attack_enemy_base': return this.attackBase(game, tank, null);
       case 'defend_our_base': return this.defend(game, tank);
-      case 'shoot_now': {
-        for (const dir of dirOrder(tank.team)) {
-          const s = scanLine(game, tank.x, tank.y, dir, tank);
-          if (safeToFire(s) && (s.first.kind === 'enemy' || s.first.kind === 'enemy_base')) return { face: dir, fire: true };
-        }
-        return this.hold(game, tank);
-      }
-      case 'dodge': return this.dodge(game, tank);
       case 'retreat': {
         const r = this.goTo(game, tank, guardPosts(game, tank.team));
         if (!r || r.arrived) return this.hold(game, tank);
@@ -144,6 +158,20 @@ export class Executor {
       default:
         return this.hold(game, tank);
     }
+  }
+
+  // 进攻基地：去指定一侧的射击位（这一侧到不了就去任意一侧）；已经对准基地就开火
+  attackBase(game, tank, side) {
+    const base = game.bases[otherTeam(tank.team)];
+    const dir = alignedDir(tank.x, tank.y, base.x, base.y);
+    if (dir) {
+      const s = scanLine(game, tank.x, tank.y, dir, tank);
+      if (s.target.kind === 'enemy_base' && s.target.dist <= 5 && safeToFire(s)) return { face: dir, fire: true };
+    }
+    const spots = side ? attackSideSpots(game, tank.team, side) : [];
+    return this.goTo(game, tank, spots.length ? spots : attackSideSpots(game, tank.team, null))
+      || this.goTo(game, tank, attackSideSpots(game, tank.team, null))
+      || this.hold(game, tank);
   }
 
   // 守家：敌人逼近基地（5 格内）就去追杀它——hunt 会从任意方向找射击位，通常是侧翼，
@@ -193,26 +221,6 @@ export class Executor {
     const dy = e.y - tank.y;
     const face = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
     return { face };
-  }
-
-  dodge(game, tank) {
-    // 找朝我飞来的子弹
-    let threat = null;
-    for (const b of game.bullets) {
-      if (b.team === tank.team) continue;
-      const d = DIRS[b.dir];
-      const along = (tank.fx - b.x) * d.dx + (tank.fy - b.y) * d.dy;
-      const across = Math.abs((tank.fx - b.x) * d.dy) + Math.abs((tank.fy - b.y) * d.dx);
-      if (along > 0 && along <= 7 && across <= 0.6 && (!threat || along < threat.along)) threat = { b, along };
-    }
-    if (!threat) return this.hold(game, tank);
-    const vertical = threat.b.dir === 'up' || threat.b.dir === 'down';
-    const sides = dirOrder(tank.team).filter((d) => (vertical ? d === 'left' || d === 'right' : d === 'up' || d === 'down'));
-    const free = sides.filter((d) => game.isPassable(tank.x + DIRS[d].dx, tank.y + DIRS[d].dy, tank));
-    if (free.length) return { move: free[Math.floor(this.rng() * free.length)] };
-    // 躲不开就迎着子弹开火，子弹相撞会抵消
-    const back = { up: 'down', down: 'up', left: 'right', right: 'left' }[threat.b.dir];
-    return { face: back, fire: true };
   }
 }
 

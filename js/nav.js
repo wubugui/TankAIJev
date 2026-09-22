@@ -1,4 +1,4 @@
-import { DIRS, T, dirOrder } from './constants.js';
+import { DIRS, T, dirOrder, tankTile } from './constants.js';
 
 const BRICK_COST = 2.5; // 打穿一块砖大约多花的“步数”
 
@@ -101,7 +101,8 @@ export function scanLine(game, x, y, dir, self) {
   const tanksByTile = new Map();
   for (const t of game.tanks) {
     if (!t.alive || t === self) continue;
-    tanksByTile.set(`${Math.round(t.fx)},${Math.round(t.fy)}`, t);
+    const at = tankTile(t);
+    tanksByTile.set(`${at.x},${at.y}`, t);
   }
   while (game.inBounds(cx, cy)) {
     const tile = game.tileAt(cx, cy);

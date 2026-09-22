@@ -260,7 +260,6 @@ function renderSetup() {
     $('#interval').value = saved.settings.intervalMs;
     $('#callouts').checked = saved.settings.callouts;
     if (saved.settings.promptStyle) $('#promptStyle').value = saved.settings.promptStyle;
-    if (saved.settings.promptVersion) $('#promptVersion').value = saved.settings.promptVersion;
     if (saved.settings.timing) $('#timing').value = saved.settings.timing;
   }
   if (saved?.rules) {
@@ -286,7 +285,6 @@ function readSetup() {
     intervalMs: clamp(Number($('#interval').value), 150, 5000, 400),
     callouts: $('#callouts').checked,
     promptStyle: $('#promptStyle').value,
-    promptVersion: $('#promptVersion').value,
     timing: $('#timing').value,
   };
   const rules = {

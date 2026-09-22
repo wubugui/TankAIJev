@@ -1,6 +1,6 @@
 import { Game, DEFAULT_SLOTS } from './game.js';
 import { AIController, HumanController } from './agents.js';
-import { makeRng } from './policies.js';
+import { makeRng } from './constants.js';
 
 export const STEP = 1 / 60;
 // 公平模式下最多等远程 AI 多久；超时的答案作废，世界照常往下走
@@ -18,7 +18,7 @@ export class Match {
     this.decide = decide;
     this.keyboard = keyboard;
     this.seed = seed;
-    this.game = new Game({ rules, slots: DEFAULT_SLOTS });
+    this.game = new Game({ rules, slots: DEFAULT_SLOTS, seed });
     this.controllers = new Map();
     this.orders = { blue: null, red: null };
     this.listeners = { decision: [], callout: [] };
