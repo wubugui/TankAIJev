@@ -13,12 +13,12 @@ export const FAIR_MAX_WAIT_MS = 4000;
 //   tickFair()  公平：所有 AI 在同一时刻、基于同一个局面一起决策；有远程 AI 在思考就暂停世界，
 //               答案全部回来后这一帧才执行。延迟只影响等待时间，不影响对局，规则 AI 和模型站在同一起跑线。
 export class Match {
-  constructor({ kinds, settings, rules, decide, keyboard, seed = 1 }) {
+  constructor({ kinds, settings, rules, decide, keyboard, seed = 1, map }) {
     this.settings = settings;
     this.decide = decide;
     this.keyboard = keyboard;
     this.seed = seed;
-    this.game = new Game({ rules, slots: DEFAULT_SLOTS, seed });
+    this.game = new Game({ rules, slots: DEFAULT_SLOTS, seed, map });
     this.controllers = new Map();
     this.orders = { blue: null, red: null };
     this.listeners = { decision: [], callout: [] };

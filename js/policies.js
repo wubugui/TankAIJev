@@ -18,8 +18,8 @@ export function ruleTactic(dec, tank) {
   return bestAttack(o, a, tank);
 }
 
-// 夹击：1 号车从左、2 号车从右进攻（侧面只隔一层砖，比正面快得多）；这一侧到不了就选路程最短的一侧
-// 旧版总选路程最短的正面，模拟里一个写死的“左右夹击”脚本能 100% 赢它；现在这版对旧版约 87% 胜率
+// 夹击：1 号车从左、2 号车从右进攻；这一侧到不了就选路程最短的一侧。
+// 这是固定打法，可以被针对：当前地图上两辆敌车一起正面冲时它赢不了（见 README 的策略循环赛）。
 function bestAttack(o, a, tank) {
   const want = tank.index === 0 ? 'attack_left' : 'attack_right';
   if (o[want]) return want;

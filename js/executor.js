@@ -1,5 +1,10 @@
 import { DIRS, T, otherTeam, dirOrder } from './constants.js';
-import { dijkstra, routeTo, dirBetween, alignedDir, scanLine, safeToFire, firingSpots } from './nav.js';
+import { dijkstra, routeTo, pathTo, stepCost, dirBetween, alignedDir, scanLine, safeToFire, firingSpots } from './nav.js';
+
+// 换路的门槛：新路线要比“继续走原路线”至少便宜这么多步才换。
+// 没有它，坦克的路径代价会随别的坦克挪动而来回变（有车占着的格子更贵），
+// 两条差不多的路线就会每走一格翻一次，坦克在两格之间来回抖、永远到不了。
+const REPLAN_MARGIN = 2;
 import { guardPosts, incomingBullet, attackSideSpots } from './observe.js';
 
 // 执行层：把决策模型选出的“计划”或“单步动作”翻译成每帧的 {move, face, fire}。
@@ -14,6 +19,8 @@ export class Executor {
     this.rng = rng;
     this.stuckFor = 0;
     this.lastTile = null;
+    this.path = null; // 正在走的路线 { tiles, goal }，只在明显更好或走不通时才换
+    this.visits = []; // 最近到达的格子，用来发现两格之间来回抖
     this.direct = null; // 直接控制模式下正在执行的单步动作
   }
 
@@ -31,6 +38,10 @@ export class Executor {
     if (tank.moving) return { fire: this.opportunisticFire(game, tank) };
 
     const key = `${tank.x},${tank.y}`;
+    if (key !== this.lastTile) {
+      this.visits.push(key);
+      if (this.visits.length > 8) this.visits.shift();
+    }
     this.stuckFor = key === this.lastTile ? this.stuckFor + dt : 0;
     this.lastTile = key;
 
@@ -40,7 +51,11 @@ export class Executor {
     let input = this.runTactic(game, tank, tactic || 'hold_position');
     // 想走却一直原地不动（被队友/敌人堵住）→ 随机挪一步
     if (input.move || input.wantMove) {
-      if (this.stuckFor > 1.2) {
+      // 堵住不动，或者最近 8 次到达只在两个格子之间来回 → 随机挪一步、丢掉原路线
+      const dithering = this.visits.length >= 8 && new Set(this.visits).size <= 2;
+      if (this.stuckFor > 1.2 || dithering) {
+        this.path = null;
+        this.visits = [];
         const free = dirOrder(tank.team).filter((d) => game.isPassable(tank.x + DIRS[d].dx, tank.y + DIRS[d].dy, tank));
         if (free.length) input = { move: free[Math.floor(this.rng() * free.length)] };
         this.stuckFor = 0;
@@ -102,16 +117,48 @@ export class Executor {
   goTo(game, tank, goals) {
     const nav = dijkstra(game, tank.x, tank.y, tank);
     const r = routeTo(nav, goals);
-    if (!r) return null;
-    if (!r.step) return { arrived: true };
-    const dir = dirBetween(tank.x, tank.y, r.step.x, r.step.y);
-    const tile = game.tileAt(r.step.x, r.step.y);
+    if (!r) { this.path = null; return null; }
+    if (!r.step) { this.path = null; return { arrived: true }; }
+    const step = this.followPath(game, tank, goals, r.cost) || this.newPath(nav, r);
+    const dir = dirBetween(tank.x, tank.y, step.x, step.y);
+    const tile = game.tileAt(step.x, step.y);
     if (tile === T.BRICK) {
       const s = scanLine(game, tank.x, tank.y, dir, tank);
       return { face: dir, fire: safeToFire(s) };
     }
-    if (game.tankAt(r.step.x, r.step.y, tank)) return { face: dir, wantMove: true };
+    if (game.tankAt(step.x, step.y, tank)) return { face: dir, wantMove: true };
     return { move: dir };
+  }
+
+  // 继续走原路线的下一步；原路线失效（离开了路线、终点不再是目标、有格子走不通、
+  // 或者比当前最优路线贵出 REPLAN_MARGIN 以上）就返回 null
+  followPath(game, tank, goals, bestCost) {
+    const p = this.path;
+    if (!p) return null;
+    if (!goals.some((g) => g.x === p.goal.x && g.y === p.goal.y)) return null;
+    let i = p.tiles.findIndex((t) => t.x === tank.x && t.y === tank.y);
+    if (i < 0) {
+      // 刚出发：还站在路线起点上
+      if (p.from.x !== tank.x || p.from.y !== tank.y) return null;
+      i = -1;
+    }
+    const rest = p.tiles.slice(i + 1);
+    if (!rest.length) return null;
+    let cost = 0;
+    for (const t of rest) {
+      const c = stepCost(game, t.x, t.y, tank);
+      if (c === Infinity) return null;
+      cost += c;
+    }
+    if (cost > bestCost + REPLAN_MARGIN) return null;
+    return rest[0];
+  }
+
+  newPath(nav, r) {
+    const tiles = pathTo(nav, r.goal);
+    const start = { x: nav.start % nav.w, y: (nav.start / nav.w) | 0 };
+    this.path = tiles ? { tiles, goal: r.goal, from: start } : null;
+    return r.step;
   }
 
   // 与目标同行/同列且中间无遮挡 → 转过去开火
