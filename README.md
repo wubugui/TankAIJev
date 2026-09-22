@@ -5,7 +5,8 @@
 **在线试玩：<https://wubugui.github.io/TankAIJev/>**
 
 - 规则 AI、随机 AI 在浏览器里运行，打开网页就能玩，不需要任何配置
-- 要用 Jev / Laya：在游戏的"AI 连接设置"里填你自己的 key 和 endpoint。它们只保存在你的浏览器里，不会上传到本站
+- 要用 Jev / Laya：在游戏的"AI 连接设置"里填你自己的 key 和 endpoint。它们只保存在你的浏览器里，只随请求发给中转服务或你填的 Laya 服务
+- 线上版默认经作者部署的 Cloudflare Worker 中转（只转发、不保存 key）。**它的 `workers.dev` 域名在中国大陆被屏蔽，国内需要开代理**，或换成自己的中转
 - 纯 Node.js 22，无第三方依赖（Laya 适配器除外）
 
 ## 快速开始
@@ -35,7 +36,7 @@ npm start
 
 | 项 | 说明 |
 |---|---|
-| 中转服务地址 | 默认 `http://localhost:3000`（本机 `npm start`）；用 `npm start` 打开游戏时留空即可 |
+| 中转服务地址 | 线上版默认是作者部署的 Cloudflare Worker（地址在 [`public/js/site-config.js`](public/js/site-config.js)）；用 `npm start` 打开游戏时留空；要用局域网 Laya 就填 `http://localhost:3000` 并在本机运行 `npm start` |
 | Jev API key | 你自己的 TypeSafe key。**必须经中转** |
 | Jev 本浏览器花费上限 | 默认 $1；按 Jev 返回的 token 数记账，到上限就停止调用，可调高或清零 |
 | Laya Endpoint / API key | 你自己的 Laya 服务，只填根地址即可（`https://host:8790`），会自动补 `/v1/systemone` |
@@ -48,7 +49,15 @@ npm start
 - **Jev 拒绝所有网页的跨域请求**。它的服务器对任何第三方来源的预检都返回 `Disallowed CORS origin`，包括 localhost，所以任何静态网页都没法在浏览器里直接调用 Jev。
 - **https 页面不能访问 http 局域网地址**。GitHub Pages 是 https，浏览器会把对 `http://192.168.x.x` 的请求当作混合内容拦掉；而且 Laya 服务本身不一定支持 CORS。
 
-中转服务接收页面发来的 `{ backend, url?, apiKey?, state, questions }`，转发给 Jev / Laya 再把结果返回。它**不保存、不记录任何 key**。有两种：
+中转服务接收页面发来的 `{ backend, url?, apiKey?, state, questions }`，转发给 Jev / Laya 再把结果返回。它的代码里**不保存、不打印任何 key**。
+
+**线上版的默认中转**：作者把 [`relay/cloudflare-worker.js`](relay/cloudflare-worker.js) 部署在了 Cloudflare 上，玩家打开网页、填上自己的 Jev key 就能用。需要知道的几点：
+- 玩家的 key 会经过这个 Worker（它只转发，不保存）。不放心就换成自己的中转
+- Cloudflare 免费版每天 10 万次请求（UTC 零点重置），超出当天报错、不扣费。一个 Jev 队友每 0.4 秒决策一次，一小时约 9000 次
+- **`*.workers.dev` 在中国大陆被 DNS 污染**，不开代理连不上。想让国内玩家免代理使用，需要给 Worker 绑一个自己的域名（Worker → Settings → Domains & Routes → Add custom domain，域名要托管在 Cloudflare），然后改 `public/js/site-config.js` 里的地址
+- 它访问不到局域网：用局域网里的 Laya 要走本机中转
+
+自己的中转有两种：
 
 **1. 本机中转：`npm start`**（推荐，也能访问你的局域网 Laya）
 
@@ -174,7 +183,7 @@ cd laya-adapter && npm install && npm start
 pip install "laya>=0.3.3" && python laya-adapter/laya_server.py
 ```
 
-然后在"AI 连接设置"里把 Laya endpoint 填成 `http://127.0.0.1:8790`。`npm run fake`（在 `laya-adapter` 目录下）不加载模型，只返回随机结果，用来确认适配器本身能通。
+然后在"AI 连接设置"里把中转地址填成 `http://localhost:3000`（本机运行 `npm start`），Laya endpoint 填 `http://127.0.0.1:8790`。线上版默认的 Cloudflare 中转访问不到你的电脑。`npm run fake`（在 `laya-adapter` 目录下）不加载模型，只返回随机结果，用来确认适配器本身能通。
 
 ## 成本控制
 

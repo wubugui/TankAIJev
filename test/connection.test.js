@@ -4,6 +4,7 @@ import {
   callBackend, describeBackend, systemOneUrl, mixedContentProblem, normalizeRelayUrl,
   defaultSettings, loadSettings, saveSettings, clearSavedSettings, loadLedger, resetLedger, probeRelay,
 } from '../public/js/connection.js';
+import { DEFAULT_RELAY_URL } from '../public/js/site-config.js';
 
 // Node 里没有 localStorage / sessionStorage，补一个内存版
 class MemoryStorage {
@@ -64,7 +65,7 @@ test('设置：勾“记住”存 localStorage，不勾存 sessionStorage；清�
   clearSavedSettings();
   assert.equal(loadSettings().jev.key, '');
   assert.equal(loadSettings(true).relayUrl, '', '同源中转时默认留空');
-  assert.equal(loadSettings(false).relayUrl, 'http://localhost:3000');
+  assert.equal(loadSettings(false).relayUrl, DEFAULT_RELAY_URL, '线上版默认用站点配置的中转');
 });
 
 test('状态说明：Jev 必须经中转且要有 key；Laya 直连会检查混合内容', () => {
@@ -77,7 +78,11 @@ test('状态说明：Jev 必须经中转且要有 key；Laya 直连会检查混�
   assert.equal(describeBackend('jev', s, online).ok, true);
   assert.equal(describeBackend('laya', s, online).ok, false, '没填 endpoint');
   s.laya.url = 'http://192.168.1.2:8790';
-  assert.equal(describeBackend('laya', s, online).ok, true, '经中转可以用局域网 http 地址');
+  assert.equal(describeBackend('laya', s, online).ok, true, '经本地中转可以用局域网 http 地址');
+  assert.match(describeBackend('laya', s, { ok: true, kind: 'worker', server: {} }).note, /只能转发 https/, 'Cloudflare 中转访问不到局域网');
+  s.laya.url = 'https://laya.example';
+  assert.equal(describeBackend('laya', s, { ok: true, kind: 'worker', server: {} }).ok, true);
+  s.laya.url = 'http://192.168.1.2:8790';
   s.laya.route = 'direct';
   globalThis.location = { protocol: 'https:' };
   assert.equal(describeBackend('laya', s, online).ok, false);
@@ -91,7 +96,7 @@ test('Jev 经中转：请求体带 key 和 model，按 usage 记本浏览器账�
   s.jev.model = 'jev-1.13.0';
   const f = fakeFetch(() => ({ json: { ...answer, model: 'jev-1.13.0', usage: { input_tokens: 1000 }, latency_ms: 250 } }));
   const r = await callBackend('jev', payload, s, f);
-  assert.equal(f.calls[0].url, 'http://localhost:3000/api/relay');
+  assert.equal(f.calls[0].url, `${DEFAULT_RELAY_URL}/api/relay`);
   assert.equal(f.calls[0].body.backend, 'jev');
   assert.equal(f.calls[0].body.apiKey, 'player-key');
   assert.equal(f.calls[0].body.model, 'jev-1.13.0');
@@ -150,6 +155,8 @@ test('连不上时给出可读的错误，不会抛出奇怪的异常', async ()
   await assert.rejects(callBackend('laya', payload, s, down), /连不上/);
   const relay = await probeRelay('http://localhost:1', down);
   assert.equal(relay.ok, false);
+  assert.equal(relay.note, '连不上');
+  assert.match((await probeRelay('https://x.y.workers.dev', down)).note, /workers.dev 域名在中国大陆等地区被屏蔽/);
   const notOurs = await probeRelay('http://x', fakeFetch(() => ({ json: { hello: 1 } })));
   assert.equal(notOurs.note, '不是本项目的中转服务');
 });

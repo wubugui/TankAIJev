@@ -8,6 +8,7 @@
 //   - https 页面不能访问 http 的局域网地址（混合内容），而且 Laya 服务本身不一定支持 CORS。
 // 中转服务就是本项目的 `npm start`（server/index.js）或 relay/cloudflare-worker.js，接口是 POST /api/relay。
 import { mockSystemOne } from './mock.js';
+import { DEFAULT_RELAY_URL } from './site-config.js';
 
 export const JEV_URL = 'https://api.typesafe.ai/v1/systemone';
 const SYSTEMONE_PATHS = ['/v1/systemone', '/alpha/decisions', '/api/alpha/decisions'];
@@ -44,7 +45,7 @@ const session = () => (typeof sessionStorage === 'undefined' ? null : sessionSto
 export function defaultSettings(sameOriginRelay = false) {
   return {
     remember: true,
-    relayUrl: sameOriginRelay ? '' : 'http://localhost:3000', // '' = 本页面自己的服务端
+    relayUrl: sameOriginRelay ? '' : DEFAULT_RELAY_URL, // '' = 本页面自己的服务端（npm start）
     jev: { key: '', model: '', budgetUsd: 1 },
     laya: { url: '', key: '', model: '', route: 'relay' },
   };
@@ -126,6 +127,8 @@ export function mixedContentProblem(targetUrl, pageProtocol = globalThis.locatio
   return null;
 }
 
+const hostOf = (u) => { try { return new URL(u).hostname; } catch { return ''; } };
+
 // ---------- 状态探测 ----------
 export async function probeRelay(relayUrl, fetchImpl = fetch) {
   const base = normalizeRelayUrl(relayUrl);
@@ -134,9 +137,12 @@ export async function probeRelay(relayUrl, fetchImpl = fetch) {
     if (!r.ok) return { ok: false, note: `HTTP ${r.status}` };
     const j = await r.json();
     if (j?.app !== 'npc-tank-relay') return { ok: false, note: '不是本项目的中转服务' };
-    return { ok: true, note: j.kind === 'worker' ? '在线（Cloudflare Worker）' : '在线（本地服务）', server: j.server || {} };
+    return { ok: true, kind: j.kind, note: j.kind === 'worker' ? '在线（Cloudflare Worker）' : '在线（本地服务）', server: j.server || {} };
   } catch {
-    return { ok: false, note: base ? '连不上' : '本页面没有中转服务' };
+    if (!base) return { ok: false, note: '本页面没有中转服务' };
+    // *.workers.dev 在中国大陆等地区被 DNS 污染，不开代理连不上
+    const blockedHint = /\.workers\.dev$/i.test(hostOf(base)) ? '（workers.dev 域名在中国大陆等地区被屏蔽，需要开代理，或换成自己的中转）' : '';
+    return { ok: false, note: `连不上${blockedHint}` };
   }
 }
 
@@ -158,6 +164,9 @@ export function describeBackend(id, s, relay) {
       return { ok: true, note: '浏览器直连（服务需支持 CORS）' };
     }
     if (!relay?.ok) return { ok: false, note: '经中转，但中转连不上' };
+    if (url && relay.kind === 'worker' && !url.startsWith('https:')) {
+      return { ok: false, note: 'Cloudflare 中转只能转发 https 地址，访问不到局域网：局域网 Laya 请在本机运行 npm start，并把中转地址改成 http://localhost:3000' };
+    }
     if (url) return { ok: true, note: '经中转' };
     if (relay.server?.laya?.hasUrl) return { ok: true, note: '经中转 · 用中转服务端配置的 endpoint' };
     return { ok: false, note: '没填 endpoint' };

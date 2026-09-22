@@ -44,12 +44,12 @@
 
       <details id="connPanel" class="conn" open>
         <summary><b>AI 连接设置</b> <span id="connSummary" class="muted"></span></summary>
-        <p class="hint">Key 和 endpoint 只保存在你自己的浏览器里，只随请求发给你填写的中转服务或 Laya 服务，不会上传到本站。<b>Jev 不允许网页直接调用</b>（它的服务器拒绝跨域请求），必须经过中转：在本机运行 <code>npm start</code>，或把 <code>relay/cloudflare-worker.js</code> 部署到你自己的 Cloudflare。详见仓库 README。</p>
+        <p class="hint">Key 和 endpoint 只保存在你自己的浏览器里，只随请求发给中转服务或你填写的 Laya 服务。<b>Jev 不允许网页直接调用</b>（它的服务器拒绝跨域请求），所以要经过中转：线上版默认用本站作者部署的 Cloudflare Worker，它只转发、不保存 key（<a href="https://github.com/wubugui/TankAIJev/blob/main/relay/cloudflare-worker.js" target="_blank" rel="noopener">代码</a>）。不放心可以换成自己的中转：本机运行 <code>npm start</code>，或部署一份自己的 Worker（<a href="https://github.com/wubugui/TankAIJev#ai-连接设置" target="_blank" rel="noopener">说明</a>）。</p>
         <div class="conn-grid">
           <fieldset>
             <legend>中转服务</legend>
             <label>地址<input id="relayUrl" type="url" placeholder="http://localhost:3000" autocomplete="off" spellcheck="false"></label>
-            <p class="small">留空 = 本页面自己的服务（用 <code>npm start</code> 打开游戏时）。</p>
+            <p class="small">留空 = 本页面自己的服务（用 <code>npm start</code> 打开游戏时）。要用局域网里的 Laya，改成 <code>http://localhost:3000</code> 并在本机运行 <code>npm start</code>。</p>
             <div class="conn-status" id="relayStatus"></div>
           </fieldset>
           <fieldset>

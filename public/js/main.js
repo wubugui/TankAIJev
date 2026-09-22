@@ -6,6 +6,7 @@ import {
   BACKENDS, loadSettings, saveSettings, clearSavedSettings, defaultSettings, loadLedger, resetLedger,
   probeRelay, describeBackend, callBackend, testBackend, normalizeRelayUrl,
 } from './connection.js';
+import { DEFAULT_RELAY_URL } from './site-config.js';
 
 const $ = (sel) => document.querySelector(sel);
 const SLOT_IDS = ['B1', 'B2', 'R1', 'R2'];
@@ -110,7 +111,7 @@ async function decideRemote(payload) {
 function fillConnForm() {
   const s = app.conn;
   $('#relayUrl').value = s.relayUrl;
-  $('#relayUrl').placeholder = app.sameOriginRelay ? '留空 = 本页面自己的服务' : 'http://localhost:3000';
+  $('#relayUrl').placeholder = app.sameOriginRelay ? '留空 = 本页面自己的服务' : DEFAULT_RELAY_URL;
   $('#jevKey').value = s.jev.key;
   $('#jevModel').value = s.jev.model;
   $('#jevBudget').value = s.jev.budgetUsd;
@@ -138,7 +139,9 @@ function setStatus(el, ok, text) {
 
 function renderConnStatus() {
   const byId = Object.fromEntries(app.backends.map((b) => [b.id, b.health]));
-  setStatus($('#relayStatus'), app.relay.ok, app.relay.ok ? `✓ ${app.relay.note}` : `✗ ${app.relay.note || '连不上'}`);
+  const isDefault = !app.sameOriginRelay && normalizeRelayUrl(app.conn.relayUrl) === DEFAULT_RELAY_URL;
+  const which = isDefault ? '默认中转' : app.conn.relayUrl ? '自定义中转' : '本页面的服务';
+  setStatus($('#relayStatus'), app.relay.ok, app.relay.ok ? `✓ ${which} ${app.relay.note}` : `✗ ${which} ${app.relay.note || '连不上'}`);
   setStatus($('#jevStatus'), byId.jev.ok, `${byId.jev.ok ? '✓' : '✗'} ${byId.jev.note}`);
   setStatus($('#layaStatus'), byId.laya.ok, `${byId.laya.ok ? '✓' : '✗'} ${byId.laya.note}`);
   const ready = app.backends.filter((b) => b.id !== 'mock' && b.health.ok).map((b) => b.label);
