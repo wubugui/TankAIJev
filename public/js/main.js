@@ -261,6 +261,7 @@ function renderSetup() {
     $('#callouts').checked = saved.settings.callouts;
     if (saved.settings.promptStyle) $('#promptStyle').value = saved.settings.promptStyle;
     if (saved.settings.promptVersion) $('#promptVersion').value = saved.settings.promptVersion;
+    if (saved.settings.timing) $('#timing').value = saved.settings.timing;
   }
   if (saved?.rules) {
     $('#matchSeconds').value = saved.rules.matchSeconds;
@@ -286,6 +287,7 @@ function readSetup() {
     callouts: $('#callouts').checked,
     promptStyle: $('#promptStyle').value,
     promptVersion: $('#promptVersion').value,
+    timing: $('#timing').value,
   };
   const rules = {
     matchSeconds: clamp(Number($('#matchSeconds').value), 30, 900, 180),
@@ -340,6 +342,7 @@ function startMatch(cfg) {
   stopMatch();
   app.config = cfg;
   app.paused = false;
+  app.waiting = false;
   app.log = [];
   keyboard.reset();
   const settings = { ...cfg.settings, backendStyles: Object.fromEntries(app.backends.map((b) => [b.id, b.promptStyle])) };
@@ -364,12 +367,24 @@ function startMatch(cfg) {
     if (!m) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    if (!app.paused && !m.game.over) {
+    if (!app.paused && !m.game.over && !app.waiting) {
       acc += dt;
-      while (acc >= STEP) { m.tick(STEP); acc -= STEP; }
+      while (acc >= STEP && !m.game.over) {
+        if (m.settings.timing === 'realtime') { m.tick(STEP); acc -= STEP; continue; }
+        // 公平模式：要等 AI 时世界停住，答案回来后这一帧才走完；等待的时间不累积，恢复后不快进
+        const wait = m.tickFair(STEP);
+        acc -= STEP;
+        if (wait) {
+          app.waiting = true;
+          app.waitStart = now;
+          acc = 0;
+          wait.finally(() => { if (app.match === m) app.waiting = false; });
+          break;
+        }
+      }
     }
     app.renderer.consumeEvents(m.game, now);
-    app.renderer.draw(m, now, { paused: app.paused });
+    app.renderer.draw(m, now, { paused: app.paused, thinkingMs: app.waiting ? now - app.waitStart : 0 });
     if (now - app.lastPanel > 200) { updatePanel(); app.lastPanel = now; }
     if (m.game.over && $('#banner').hidden) showResult();
     app.raf = requestAnimationFrame(frame);
@@ -474,6 +489,10 @@ function updatePanel() {
   $('#hudBlue').textContent = `蓝 ${g.teamKills('blue')} 杀`;
   $('#hudRed').textContent = `红 ${g.teamKills('red')} 杀`;
   $('#hudBases').textContent = `基地血量　蓝 ${g.bases.blue.hp}/${g.rules.baseHp}　红 ${g.bases.red.hp}/${g.rules.baseHp}`;
+  const fz = m.freeze;
+  $('#hudTiming').textContent = m.settings.timing === 'realtime'
+    ? '实时模式：不等 AI，远程 AI 按晚到的局面决策'
+    : `公平模式：AI 思考时暂停，共等 ${(fz.totalMs / 1000).toFixed(1)} 秒${fz.count ? `，平均每次 ${Math.round(fz.totalMs / fz.count)} 毫秒` : ''}`;
   for (const t of g.tanks) {
     const card = $(`#card-${t.id}`);
     if (!card) continue;
@@ -487,7 +506,7 @@ function updatePanel() {
     f('hp').textContent = t.alive ? `血 ${t.hp}/${g.rules.tankHp}` : t.lives > 0 ? `复活 ${Math.max(0, t.respawnAt - g.time).toFixed(1)}s` : '阵亡';
     f('kd').textContent = `命 ${t.lives} · 杀 ${t.kills}`;
     const s = c.stats;
-    f('dec').textContent = isAi ? `决策 ${s.decisions}` : '';
+    f('dec').textContent = isAi ? `决策 ${s.decisions}${s.late ? ` · 超时作废 ${s.late}` : ''}` : '';
     const lat = avgLatency(s);
     f('lat').textContent = lat != null ? `延迟 ${lat}ms${c.inFlight ? ' …' : ''}` : '';
     f('conf').textContent = s.confN && c.kind.startsWith('remote:') ? `置信 ${(s.confSum / s.confN).toFixed(2)}` : '';
@@ -574,11 +593,14 @@ function showResult() {
 // 自动化测试可以用 __tankDebug.advance(秒) 手动推进。
 window.__tankDebug = {
   app,
-  advance(seconds) {
+  async advance(seconds) {
     const m = app.match;
     if (!m) return null;
     const n = Math.round(seconds / STEP);
-    for (let i = 0; i < n && !m.game.over && !app.paused; i++) m.tick(STEP);
+    for (let i = 0; i < n && !m.game.over && !app.paused; i++) {
+      if (m.settings.timing === 'realtime') m.tick(STEP);
+      else { const wait = m.tickFair(STEP); if (wait) await wait; }
+    }
     const now = performance.now();
     app.renderer.consumeEvents(m.game, now);
     app.renderer.draw(m, now, { paused: app.paused });

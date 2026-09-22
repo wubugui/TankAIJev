@@ -13,7 +13,7 @@
 //   --style auto|full|compact 提示词风格（默认 auto：按后端配置）
 //   --prompt v1|v2|v3        提示词版本（默认 v3）
 //   --stagger                远程 AI 同队两车错开半个决策周期（实验选项，默认关）
-//   --realtime               按真实时间推进（模型延迟会影响战局）；默认“锁步”：等决策返回再推进，只比决策质量
+//   --realtime               按真实时间推进（模型延迟会影响战局）；默认“公平/锁步”：所有 AI 同一时刻决策，等答案回来再推进，只比决策质量
 //   --yes                    预计花费超过 $0.05 时不再询问确认
 //
 // 付费后端与网页版共用 data/usage.json 账本和 BUDGET_USD 上限。
@@ -106,6 +106,8 @@ async function main() {
         promptStyle: args.style,
         promptVersion: args.prompt,
         stagger: args.stagger,
+        timing: args.realtime ? 'realtime' : 'fair',
+        maxWaitMs: Infinity, // 批量评测不设等待上限，每个答案都等到
         backendStyles: Object.fromEntries(backends.map((b) => [b.id, b.promptStyle])),
       };
       const match = new Match({ kinds, settings, rules: { matchSeconds: args.seconds }, decide, seed: 1000 + i });
@@ -120,10 +122,10 @@ async function main() {
           while (acc >= STEP && !match.game.over) { match.tick(STEP); acc -= STEP; }
         }
       } else {
+        // 公平模式（锁步）：所有 AI 在同一时刻决策，等答案回来再推进，和网页的公平模式同一套代码
         while (!match.game.over) {
-          match.tick(STEP);
-          const pending = match.pendingDecisions();
-          if (pending.length) await Promise.all(pending);
+          const wait = match.tickFair(STEP);
+          if (wait) await wait;
         }
       }
       await Promise.all(match.pendingDecisions());

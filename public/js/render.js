@@ -91,6 +91,7 @@ export class Renderer {
     this.drawBubbles(game, now);
 
     if (overlay.paused) this.drawCenterText('已暂停（按 P 继续）');
+    else if (overlay.thinkingMs > 120) this.drawBadge(`⏸ 等待 AI 决策 ${(overlay.thinkingMs / 1000).toFixed(1)}s`);
   }
 
   drawBrick(px, py) {
@@ -301,6 +302,18 @@ export class Renderer {
       ctx.fillStyle = '#111827';
       ctx.fillText(text, cx, cy + 3);
     }
+  }
+
+  drawBadge(text) {
+    const ctx = this.ctx;
+    ctx.font = 'bold 13px system-ui, sans-serif';
+    const w = ctx.measureText(text).width + 16;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    roundRect(ctx, 8, 8, w, 24, 6);
+    ctx.fill();
+    ctx.fillStyle = '#fde68a';
+    ctx.textAlign = 'left';
+    ctx.fillText(text, 16, 25);
   }
 
   drawCenterText(text) {
